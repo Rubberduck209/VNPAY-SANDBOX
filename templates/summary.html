@@ -1,0 +1,21 @@
+{% extends "base_layout.html" %}
+{% block content %}
+    <div class="panel {% if is_success %}panel-success{% else %}panel-warning{% endif %}">
+        <div class="panel-heading">{{ title }}</div>
+        <div class="panel-body">
+            <p><strong>Mã đơn hàng:</strong> {{ order_id }}</p>
+            <p><strong>Số tiền:</strong> {{ amount }} VND</p>
+            <p><strong>Mô tả:</strong> {{ order_desc }}</p>
+            <p><strong>Mã giao dịch VNPay:</strong> {{ vnp_TransactionNo }}</p>
+            <p><strong>Trạng thái:</strong> {{ payment_status }}</p>
+            {% if vnp_ResponseCode %}
+                <p><strong>Mã phản hồi VNPay:</strong> {{ vnp_ResponseCode }}</p>
+            {% endif %}
+
+            <div class="text-right" style="margin-top: 20px;">
+                <a href="{% url 'index' %}" class="btn btn-primary">Về trang chủ</a>
+                <a href="{% url 'payment' %}" class="btn btn-default">Tạo giao dịch mới</a>
+            </div>
+        </div>
+    </div>
+{% endblock %}
