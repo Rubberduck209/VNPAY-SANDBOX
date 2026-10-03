@@ -14,7 +14,7 @@ Tạo file `.env` từ file mẫu.
 - `DJANGO_SECRET_KEY`: dán các ký tự được sinh ra từ câu lệnh sau
 
    ```powershell
-   .\.venv\Scripts\python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+   python -c "import secrets; print(secrets.token_urlsafe(50))"
    ```
 
 - `DB_PASSWORD` va `DB_ROOT_PASSWORD`: Đặt 2 mật khẩu bất kỳ
@@ -69,3 +69,38 @@ FROM vnpay_python_paymenttransaction
 ORDER BY created_at DESC;
 ```
 
+## Cau hinh IPN tren cong VNPAY Sandbox
+
+
+
+1. Khoi dong ung dung va Cloudflare Tunnel bang Docker Compose:
+
+   ```powershell
+   docker compose --profile tunnel up --build -d
+   ```
+
+2. Lay hostname public do tunnel cap:
+
+   ```powershell
+   docker compose logs -f cloudflared
+   ```
+
+   Cho den khi log hien URL HTTPS dang `https://ten-ngau-nhien.trycloudflare.com`. Giu container tunnel chay.
+
+
+
+3. Tren cong VNPAY Sandbox, vao **Cau hinh IPN URL** va nhap URL:
+
+   vào https://sandbox.vnpayment.vn/vnpaygw-sit-testing/user/login đăng nhập bằng tài khoản merchant đã tạo sau đó vào mục IPN URL nhập:
+
+   ```text
+   https://ten-ngau-nhien.trycloudflare.com/payment_ipn
+   ```
+
+   
+
+dừng tunnel:
+
+```powershell
+docker compose stop cloudflared
+```

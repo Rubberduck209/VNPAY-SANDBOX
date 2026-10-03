@@ -49,6 +49,7 @@ class PaymentCallbackTests(TestCase):
         response = self.client.get(callback_url)
         self.payment_record.refresh_from_db()
         self.assertEqual(response.json()['RspCode'], '00')
+        self.assertEqual(response['Content-Type'], 'application/json')
         self.assertEqual(self.payment_record.status, PaymentTransaction.Status.SUCCEEDED)
         self.assertEqual(self.payment_record.transaction_no, '987654321')
 

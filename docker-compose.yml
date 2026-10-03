@@ -27,7 +27,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-vnpay-dev-password}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-change-me}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,web}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,web,.trycloudflare.com}
       VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:-}
       VNPAY_HASH_SECRET_KEY: ${VNPAY_HASH_SECRET_KEY:-}
       VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-http://localhost:8000/payment_return}
@@ -38,6 +38,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://web:8000
+    restart: unless-stopped
+    profiles:
+      - tunnel
+    depends_on:
+      - web
 
 volumes:
   mysql_data:

@@ -42,11 +42,7 @@ class vnpay:
                     seq = 1
                     hasData = str(key) + '=' + urllib.parse.quote_plus(str(val))
         hashValue = self.__hmacsha512(secret_key, hasData)
-
-        print(
-            'Validate debug, HashData:' + hasData + "\n HashValue:" + hashValue + "\nInputHash:" + vnp_SecureHash)
-
-        return vnp_SecureHash == hashValue
+        return hmac.compare_digest(vnp_SecureHash, hashValue)
 
     @staticmethod
     def __hmacsha512(key, data):
