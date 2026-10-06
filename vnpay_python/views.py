@@ -8,7 +8,9 @@ import random
 import requests
 from datetime import datetime
 from django.conf import settings
+from django.core.paginator import Paginator
 from django.db import transaction as db_transaction
+from django.db.models import Q, Sum
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render, redirect
 from django.utils.http import urlquote
@@ -20,7 +22,48 @@ from vnpay_python.vnpay import vnpay
 
 
 def index(request):
-    return render(request, "index.html", {"title": "Danh sách demo"})
+    transactions = PaymentTransaction.objects.all()
+    succeeded = transactions.filter(status=PaymentTransaction.Status.SUCCEEDED)
+    context = {
+        'title': 'Tổng quan thanh toán',
+        'transaction_count': transactions.count(),
+        'pending_count': transactions.filter(
+            status=PaymentTransaction.Status.PENDING
+        ).count(),
+        'succeeded_count': succeeded.count(),
+        'failed_count': transactions.filter(
+            status=PaymentTransaction.Status.FAILED
+        ).count(),
+        'succeeded_amount': succeeded.aggregate(total=Sum('amount'))['total'] or 0,
+        'recent_transactions': transactions[:5],
+    }
+    return render(request, "index.html", context)
+
+
+def transaction_history(request):
+    query = request.GET.get('q', '').strip()
+    status = request.GET.get('status', '').strip()
+    transactions = PaymentTransaction.objects.all()
+
+    if query:
+        transactions = transactions.filter(
+            Q(order_id__icontains=query)
+            | Q(order_desc__icontains=query)
+            | Q(transaction_no__icontains=query)
+        )
+    if status in dict(PaymentTransaction.Status.choices):
+        transactions = transactions.filter(status=status)
+    else:
+        status = ''
+
+    page = Paginator(transactions, 10).get_page(request.GET.get('page'))
+    return render(request, 'transactions.html', {
+        'title': 'Lịch sử giao dịch',
+        'page': page,
+        'query': query,
+        'selected_status': status,
+        'status_choices': PaymentTransaction.Status.choices,
+    })
 
 
 def hmacsha512(key, data):
@@ -144,36 +187,36 @@ def payment_ipn(request):
 
 
 def payment_return(request):
-    payment_record, error = _process_vnpay_callback(request.GET)
-    if error and error != 'already_processed':
-        error_messages = {
-            'invalid_request': 'Callback thiếu tham số bắt buộc.',
-            'invalid_signature': 'Chữ ký callback không hợp lệ.',
-            'wrong_merchant': 'Mã merchant trong callback không khớp.',
-            'unknown_order': 'Không tìm thấy đơn hàng.',
-            'invalid_amount': 'Số tiền callback không khớp với đơn hàng.',
-        }
-        return render(request, 'payment_return.html', {
-            'title': 'Không xác minh được kết quả thanh toán',
-            'result': 'Không hợp lệ',
-            'msg': error_messages[error],
-            'is_success': False,
-        })
+    order_id = request.GET.get('vnp_TxnRef') or request.GET.get('order_id', '')
+    if request.GET.get('vnp_TxnRef'):
+        return redirect('{}?{}'.format(
+            reverse('payment_return'),
+            urllib.parse.urlencode({'order_id': order_id}),
+        ))
 
+    payment_record = get_object_or_404(PaymentTransaction, order_id=order_id)
     is_success = payment_record.status == PaymentTransaction.Status.SUCCEEDED
-    summary_url = '{}?{}'.format(
-        reverse('summary'), urllib.parse.urlencode({'order_id': payment_record.order_id})
-    )
+    is_pending = payment_record.status == PaymentTransaction.Status.PENDING
+    is_failed = payment_record.status == PaymentTransaction.Status.FAILED
     return render(request, 'payment_return.html', {
-        'title': 'Kết quả thanh toán',
-        'result': payment_status_label(payment_record.response_code),
+        'title': (
+            'Đang chờ xác nhận'
+            if is_pending
+            else 'Thanh toán thành công' if is_success else 'Thanh toán chưa thành công'
+        ),
+        'result': payment_record.get_status_display(),
         'order_id': payment_record.order_id,
         'amount': payment_record.amount,
         'order_desc': payment_record.order_desc,
         'vnp_TransactionNo': payment_record.transaction_no,
         'vnp_ResponseCode': payment_record.response_code,
-        'summary_url': summary_url,
         'is_success': is_success,
+        'is_pending': is_pending,
+        'is_failed': is_failed,
+        'refresh_url': '{}?{}'.format(
+            reverse('payment_return'),
+            urllib.parse.urlencode({'order_id': payment_record.order_id}),
+        ),
     })
 
 

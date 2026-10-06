@@ -20,6 +20,7 @@ import vnpay_python.views
 
 urlpatterns = [
     url(r'^$', vnpay_python.views.index, name='index'),
+    url(r'^transactions$', vnpay_python.views.transaction_history, name='transactions'),
     url(r'^payment$', vnpay_python.views.payment, name='payment'),
     url(r'^payment_ipn$', vnpay_python.views.payment_ipn, name='payment_ipn'),
     url(r'^payment_return$', vnpay_python.views.payment_return, name='payment_return'),

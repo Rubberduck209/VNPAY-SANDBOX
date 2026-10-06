@@ -1,0 +1,84 @@
+{% extends "base_layout.html" %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">DATABASE</span>
+        <h1>{{ title }}</h1>
+        <p>Dữ liệu giao dịch được đọc trực tiếp từ cơ sở dữ liệu của ứng dụng.</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'payment' %}">＋ Tạo thanh toán</a>
+</section>
+
+<section class="content-card">
+    <form class="filter-bar" method="get" action="{% url 'transactions' %}">
+        <label class="sr-only" for="transaction-search">Tìm giao dịch</label>
+        <input id="transaction-search" class="form-control search-input" type="search" name="q"
+               value="{{ query }}" placeholder="Tìm mã đơn, mã giao dịch hoặc nội dung">
+        <label class="sr-only" for="transaction-status">Lọc theo trạng thái</label>
+        <select id="transaction-status" class="form-control status-select" name="status">
+            <option value="">Tất cả trạng thái</option>
+            {% for value, label in status_choices %}
+            <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-primary" type="submit">Lọc giao dịch</button>
+        {% if query or selected_status %}
+        <a class="btn btn-default" href="{% url 'transactions' %}">Xóa lọc</a>
+        {% endif %}
+    </form>
+
+    <div class="table-summary">
+        <span><strong>{{ page.paginator.count }}</strong> giao dịch</span>
+        {% if page.paginator.count %}
+        <span>Trang {{ page.number }} / {{ page.paginator.num_pages }}</span>
+        {% endif %}
+    </div>
+    {% if page.object_list %}
+    <div class="table-responsive">
+        <table class="table transaction-table">
+            <thead>
+            <tr>
+                <th>Mã đơn hàng</th>
+                <th>Nội dung</th>
+                <th>Ngân hàng</th>
+                <th>Ngày tạo</th>
+                <th>Số tiền</th>
+                <th>Trạng thái</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for transaction in page.object_list %}
+            <tr>
+                <td><strong class="order-id">{{ transaction.order_id }}</strong><span class="cell-subtitle">Mã GD: {{ transaction.transaction_no|default:"—" }}</span></td>
+                <td>{{ transaction.order_desc }}</td>
+                <td>{{ transaction.bank_code|default:transaction.requested_bank_code|default:"—" }}</td>
+                <td>{{ transaction.created_at|date:"d/m/Y H:i" }}</td>
+                <td class="amount-cell">{{ transaction.amount|floatformat:0 }} ₫</td>
+                <td><span class="status-pill status-{{ transaction.status }}">{{ transaction.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <nav class="pagination-bar" aria-label="Phân trang giao dịch">
+        {% if page.has_previous %}
+        <a class="btn btn-default" href="?q={{ query|urlencode }}&amp;status={{ selected_status|urlencode }}&amp;page={{ page.previous_page_number }}">← Trước</a>
+        {% else %}
+        <span class="btn btn-default disabled">← Trước</span>
+        {% endif %}
+        <span class="pagination-current">Trang {{ page.number }} / {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+        <a class="btn btn-default" href="?q={{ query|urlencode }}&amp;status={{ selected_status|urlencode }}&amp;page={{ page.next_page_number }}">Sau →</a>
+        {% else %}
+        <span class="btn btn-default disabled">Sau →</span>
+        {% endif %}
+    </nav>
+    {% else %}
+    <div class="empty-state compact-empty">
+        <span class="empty-icon">⌕</span>
+        <h3>Không tìm thấy giao dịch</h3>
+        <p>Thử thay đổi từ khóa hoặc trạng thái lọc.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

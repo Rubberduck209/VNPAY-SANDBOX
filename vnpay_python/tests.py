@@ -56,15 +56,39 @@ class PaymentCallbackTests(TestCase):
         duplicate_response = self.client.get(callback_url)
         self.assertEqual(duplicate_response.json()['RspCode'], '02')
 
-    def test_successful_return_shows_home_button_without_summary_redirect(self):
-        response = self.client.get(
-            reverse('payment_return'), self.signed_callback()
+    def test_return_only_reads_database_and_redirects_to_clean_order_url(self):
+        callback = self.signed_callback()
+        response = self.client.get(reverse('payment_return'), callback)
+
+        self.payment_record.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('order_id=order-1001', response['Location'])
+        self.assertNotIn('vnp_SecureHash', response['Location'])
+        self.assertEqual(self.payment_record.status, PaymentTransaction.Status.PENDING)
+
+        response = self.client.get(response['Location'])
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Đang chờ VNPay xác nhận')
+        self.assertContains(response, 'setTimeout')
+        self.assertContains(response, 'Về tổng quan')
+
+    def test_return_displays_success_only_after_ipn_updates_database(self):
+        callback = self.signed_callback()
+        ipn_response = self.client.get(
+            '{}?{}'.format(reverse('payment_ipn'), urlencode(callback))
         )
+        self.assertEqual(ipn_response.json()['RspCode'], '00')
+
+        response = self.client.get(reverse('payment_return'), callback)
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(response['Location'])
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Về trang chủ')
-        self.assertNotContains(response, 'Đến trang tổng')
+        self.assertContains(response, 'ĐÃ XÁC NHẬN QUA IPN')
+        self.assertContains(response, 'Thanh toán thành công')
         self.assertNotContains(response, 'setTimeout')
+        self.payment_record.refresh_from_db()
+        self.assertEqual(self.payment_record.status, PaymentTransaction.Status.SUCCEEDED)
 
     def test_invalid_signature_does_not_change_pending_payment(self):
         callback = self.signed_callback()
@@ -100,3 +124,60 @@ class PaymentCallbackTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Giao dịch thành công')
         self.assertContains(response, '987654321')
+
+
+class TransactionHistoryTests(TestCase):
+    def setUp(self):
+        self.pending = PaymentTransaction.objects.create(
+            order_id='order-pending',
+            amount=10000,
+            order_type='other',
+            order_desc='Pending test order',
+        )
+        self.succeeded = PaymentTransaction.objects.create(
+            order_id='order-success',
+            amount=25000,
+            order_type='other',
+            order_desc='Successful test order',
+            status=PaymentTransaction.Status.SUCCEEDED,
+            transaction_no='txn-25000',
+            bank_code='NCB',
+        )
+
+    def test_dashboard_shows_database_counts_and_recent_transaction(self):
+        response = self.client.get(reverse('index'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'order-success')
+        self.assertContains(response, 'Tổng giao dịch')
+        self.assertEqual(response.context['transaction_count'], 2)
+        self.assertEqual(response.context['pending_count'], 1)
+        self.assertEqual(response.context['succeeded_count'], 1)
+        self.assertEqual(response.context['succeeded_amount'], 25000)
+
+    def test_transaction_list_filters_database_records_by_status_and_search(self):
+        response = self.client.get(
+            reverse('transactions'),
+            {'status': PaymentTransaction.Status.SUCCEEDED, 'q': 'txn-25000'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'order-success')
+        self.assertNotContains(response, 'order-pending')
+        self.assertEqual(response.context['page'].paginator.count, 1)
+
+    def test_transaction_list_handles_invalid_page_and_empty_search(self):
+        response = self.client.get(reverse('transactions'), {'page': 'invalid', 'q': 'missing'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Không tìm thấy giao dịch')
+        self.assertEqual(response.context['page'].paginator.count, 0)
+
+    def test_payment_tools_render_with_shared_navigation(self):
+        for page_name in ('payment', 'query', 'refund'):
+            with self.subTest(page=page_name):
+                response = self.client.get(reverse(page_name))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'VNPay')
+                self.assertContains(response, 'Giao dịch')

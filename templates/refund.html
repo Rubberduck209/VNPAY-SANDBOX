@@ -1,8 +1,11 @@
 {% extends "base_layout.html" %}
 {% block content %}
 
-    <h3>{{ title }}</h3>
-    <div class="table-responsive">
+    <section class="page-heading">
+        <div><span class="eyebrow">CÔNG CỤ VNPAY</span><h1>{{ title }}</h1><p>Gửi yêu cầu hoàn tiền cho giao dịch Sandbox.</p></div>
+    </section>
+    <section class="content-card form-card">
+    <div class="form-content">
         <form action="{% url "refund" %}" id="create_form" method="post">
 
             <div class="form-group">
@@ -18,22 +21,22 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="order_id">Số tiền hoàn trả</label>
+                <label for="amount">Số tiền hoàn trả</label>
                 <input class="form-control" id="amount"
                        name="amount" type="text"/>
             </div>
             <div class="form-group">
-                <label for="order_id">Thời gian giao dịch thanh toán</label>
+                <label for="trans_date">Thời gian giao dịch thanh toán</label>
                 <input class="form-control" id="trans_date"
                        name="trans_date" type="text"/>
             </div>
             <div class="form-group">
-                <label for="order_id">Nội dung/lý do hoàn trả</label>
+                <label for="order_desc">Nội dung/lý do hoàn trả</label>
                 <input class="form-control" id="order_desc"
                        name="order_desc" type="text"/>
             </div>
             <div class="form-group">
-                <button type="submit" class="btn btn-primary">Refund</button>
+                <button type="submit" class="btn btn-primary">Gửi yêu cầu hoàn tiền</button>
             </div>
             {% csrf_token %}
         </form>
@@ -45,7 +48,7 @@
             {% endfor %}
 
         {% endif %}
-        <a href="{% url 'index' %}" class="btn btn-default">Về trang chủ</a>
     </div>
+    </section>
 
 {% endblock %}

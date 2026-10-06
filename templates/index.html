@@ -1,16 +1,77 @@
 {% extends "base_layout.html" %}
 {% block content %}
-    <div class="panel panel-default">
-        <!-- Default panel contents -->
-        <div class="panel-heading">{{ title }}</div>
-        <div class="table-responsive">
-            <ul class="list-group">
-                <i class="list-group-item"><a href="{% url "payment" %}">Demo Thanh toán</a></i>
-                <i class="list-group-item"><a href="{% url "query" %}">Demo Query (Kiểm tra kết quả Giao dịch tại
-                    VNPAY)</a></i>
-                <i class="list-group-item"><a href="{% url "refund" %}">Demo Refund (Gửi yêu cầu hoàn tiền cho giao
-                    dịch)</a></i>
-            </ul>
-        </div>
+<section class="welcome-panel">
+    <div>
+        <span class="eyebrow">TRUNG TÂM THANH TOÁN</span>
+        <h1>{{ title }}</h1>
+        <p>Theo dõi giao dịch và trạng thái thanh toán của bạn trong một nơi.</p>
     </div>
+    <a class="btn btn-primary btn-lg" href="{% url 'payment' %}">＋ Tạo thanh toán</a>
+</section>
+
+<section class="stats-grid" aria-label="Thống kê giao dịch">
+    <article class="stat-card">
+        <span class="stat-label">Tổng giao dịch</span>
+        <strong class="stat-value">{{ transaction_count }}</strong>
+        <span class="stat-note">Đơn hàng đã ghi nhận</span>
+    </article>
+    <article class="stat-card">
+        <span class="stat-label">Đang chờ</span>
+        <strong class="stat-value">{{ pending_count }}</strong>
+        <span class="stat-note"><span class="status-dot pending"></span> Chờ kết quả thanh toán</span>
+    </article>
+    <article class="stat-card">
+        <span class="stat-label">Thành công</span>
+        <strong class="stat-value">{{ succeeded_count }}</strong>
+        <span class="stat-note"><span class="status-dot succeeded"></span> Đã xác nhận</span>
+    </article>
+    <article class="stat-card">
+        <span class="stat-label">Tổng tiền thành công</span>
+        <strong class="stat-value stat-money">{{ succeeded_amount|floatformat:0 }} <small>₫</small></strong>
+        <span class="stat-note">{{ failed_count }} giao dịch chưa thành công</span>
+    </article>
+</section>
+
+<section class="content-card">
+    <div class="section-heading">
+        <div>
+            <span class="eyebrow">DATABASE</span>
+            <h2>Giao dịch gần đây</h2>
+        </div>
+        <a class="text-link" href="{% url 'transactions' %}">Xem tất cả <span aria-hidden="true">→</span></a>
+    </div>
+    {% if recent_transactions %}
+    <div class="table-responsive">
+        <table class="table transaction-table">
+            <thead>
+            <tr>
+                <th>Mã đơn hàng</th>
+                <th>Nội dung</th>
+                <th>Ngày tạo</th>
+                <th>Số tiền</th>
+                <th>Trạng thái</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for transaction in recent_transactions %}
+            <tr>
+                <td><strong class="order-id">{{ transaction.order_id }}</strong><span class="cell-subtitle">#{{ transaction.transaction_no|default:"Chưa có mã GD" }}</span></td>
+                <td>{{ transaction.order_desc }}</td>
+                <td>{{ transaction.created_at|date:"d/m/Y H:i" }}</td>
+                <td class="amount-cell">{{ transaction.amount|floatformat:0 }} ₫</td>
+                <td><span class="status-pill status-{{ transaction.status }}">{{ transaction.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <span class="empty-icon">↗</span>
+        <h3>Chưa có giao dịch</h3>
+        <p>Tạo giao dịch đầu tiên để dữ liệu được hiển thị tại đây.</p>
+        <a class="btn btn-primary" href="{% url 'payment' %}">Tạo thanh toán</a>
+    </div>
+    {% endif %}
+</section>
 {% endblock %}

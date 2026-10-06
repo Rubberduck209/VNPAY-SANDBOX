@@ -1,12 +1,12 @@
-## Yeu cau
-- Vào website https://sandbox.vnpayment.vn/devreg/ để đăng ký merchant môi trường test (URL đặt sao cho không báo lỗi URL đã tồn tại là được)
+## Yêu cầu
+- Vào website https://sandbox.vnpayment.vn/devreg/ để đăng ký merchant môi trường test (URL đặt sao cho không báo lỗi URL đã tồn tại là được, khuyến khích để ký tự đặt biệt trong password)
 
 - Cài Docker Desktop và đảm bảo Docker Engine đang chạy.
 - Mở PowerShell tại thư mục chứa `docker-compose.yml` và `manage.py`.
 
-## Chuan bi `.env`
+## Set up file `.env`
 
-Tạo file `.env` từ file mẫu.
+Tạo file `.env` từ file `.env.example`.
 
 
 Điền các giá trị sau đây trong file `.env`:
@@ -23,8 +23,7 @@ Tạo file `.env` từ file mẫu.
 
 
 
-
-## Khoi dong
+## Khởi động
 
 Khởi động docker
 
@@ -36,13 +35,39 @@ Khi thấy dòng `Starting development server at http://0.0.0.0:8000`, mở:
 
 <http://localhost:8000>
 
+
+
+## Set up cấu hình IPN:
+Mở powershell trong thư mục chứa `docker-compose.yml` và `manage.py`.
+Sau đó khởi động cloudflare tunnel:
+
+   ```powershell
+   docker compose --profile tunnel up --build -d
+   ```
+Lấy hostname do tunnel cung cấp:
+
+   ```powershell
+   docker compose logs -f cloudflared
+   ```
+   Rồi tìm dòng log có URL HTTPS có dạng `https://ten-ngau-nhien.trycloudflare.com`.
+
+Sau đó đăng nhập trên cổng [VNPAYGW SIT Testing](https://sandbox.vnpayment.vn/vnpaygw-sit-testing/user/login) bằng tài khoản merchant đã tạo và vào mục **Cấu hình IPN URL** và nhập:
+   `https://ten-ngau-nhien.trycloudflare.com/payment_ipn`
+
+
+
+
+
+
+Các công cụ hỗ trợ:
+
 Xem trạng thái container:
 
 ```powershell
 docker compose ps
 ```
 
-Để xem logs nếu app không lên:
+Xem logs:
 
 ```powershell
 docker compose logs -f web
@@ -69,37 +94,9 @@ FROM vnpay_python_paymenttransaction
 ORDER BY created_at DESC;
 ```
 
-## Cau hinh IPN tren cong VNPAY Sandbox
 
 
-
-1. Khoi dong ung dung va Cloudflare Tunnel bang Docker Compose:
-
-   ```powershell
-   docker compose --profile tunnel up --build -d
-   ```
-
-2. Lay hostname public do tunnel cap:
-
-   ```powershell
-   docker compose logs -f cloudflared
-   ```
-
-   Cho den khi log hien URL HTTPS dang `https://ten-ngau-nhien.trycloudflare.com`. Giu container tunnel chay.
-
-
-
-3. Tren cong VNPAY Sandbox, vao **Cau hinh IPN URL** va nhap URL:
-
-   vào https://sandbox.vnpayment.vn/vnpaygw-sit-testing/user/login đăng nhập bằng tài khoản merchant đã tạo sau đó vào mục IPN URL nhập:
-
-   ```text
-   https://ten-ngau-nhien.trycloudflare.com/payment_ipn
-   ```
-
-   
-
-dừng tunnel:
+Chỉ dừng riêng tunnel:
 
 ```powershell
 docker compose stop cloudflared
