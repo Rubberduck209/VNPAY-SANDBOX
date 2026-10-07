@@ -1,4 +1,5 @@
 {% extends "base_layout.html" %}
+{% load currency %}
 {% block content %}
 <section class="page-heading">
     <div>
@@ -53,7 +54,7 @@
                 <td>{{ transaction.order_desc }}</td>
                 <td>{{ transaction.bank_code|default:transaction.requested_bank_code|default:"—" }}</td>
                 <td>{{ transaction.created_at|date:"d/m/Y H:i" }}</td>
-                <td class="amount-cell">{{ transaction.amount|floatformat:0 }} ₫</td>
+                <td class="amount-cell">{{ transaction.amount|vnd }} ₫</td>
                 <td><span class="status-pill status-{{ transaction.status }}">{{ transaction.get_status_display }}</span></td>
             </tr>
             {% endfor %}

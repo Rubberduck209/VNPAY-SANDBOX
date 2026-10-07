@@ -1,4 +1,5 @@
 {% extends "base_layout.html" %}
+{% load currency %}
 {% block content %}
 <section class="return-card content-card">
     <div class="return-state {% if is_success %}return-success{% elif is_pending %}return-pending{% else %}return-failed{% endif %}">
@@ -27,7 +28,7 @@
         </div>
         <div class="return-detail">
             <span>Số tiền</span>
-            <strong>{{ amount|floatformat:0 }} ₫</strong>
+            <strong>{{ amount|vnd }} ₫</strong>
         </div>
         <div class="return-detail">
             <span>Trạng thái trong hệ thống</span>

@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from vnpay_python.models import PaymentTransaction
+from vnpay_python.templatetags.currency import vnd
 
 
 @override_settings(
@@ -123,7 +124,14 @@ class PaymentCallbackTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Giao dịch thành công')
+        self.assertContains(response, '12.500 VND')
         self.assertContains(response, '987654321')
+
+    def test_payment_amount_is_formatted_with_dot_thousands_separator(self):
+        response = self.client.get(reverse('payment_return'), {'order_id': self.payment_record.order_id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '12.500 ₫')
 
 
 class TransactionHistoryTests(TestCase):
@@ -150,6 +158,7 @@ class TransactionHistoryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'order-success')
         self.assertContains(response, 'Tổng giao dịch')
+        self.assertContains(response, '25.000 ₫')
         self.assertEqual(response.context['transaction_count'], 2)
         self.assertEqual(response.context['pending_count'], 1)
         self.assertEqual(response.context['succeeded_count'], 1)
@@ -163,6 +172,7 @@ class TransactionHistoryTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'order-success')
+        self.assertContains(response, '25.000 ₫')
         self.assertNotContains(response, 'order-pending')
         self.assertEqual(response.context['page'].paginator.count, 1)
 
@@ -181,3 +191,6 @@ class TransactionHistoryTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, 'VNPay')
                 self.assertContains(response, 'Giao dịch')
+
+    def test_currency_uses_dots_as_thousands_separator(self):
+        self.assertEqual(vnd(500000), '500.000')
