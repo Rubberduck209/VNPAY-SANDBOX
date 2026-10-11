@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 import urllib
 import urllib.parse
@@ -18,7 +16,7 @@ from django.urls import reverse
 
 from vnpay_python.forms import PaymentForm
 from vnpay_python.models import PaymentTransaction
-from vnpay_python.vnpay import vnpay
+from vnpay_lib import VNPayCallbackError, VNPayClient
 
 
 def index(request):
@@ -66,12 +64,6 @@ def transaction_history(request):
     })
 
 
-def hmacsha512(key, data):
-    byteKey = key.encode('utf-8')
-    byteData = data.encode('utf-8')
-    return hmac.new(byteKey, byteData, hashlib.sha512).hexdigest()
-
-
 def payment(request):
     if request.method == 'POST':
         form = PaymentForm(request.POST)
@@ -95,53 +87,37 @@ def payment(request):
                 requested_bank_code=bank_code,
             )
 
-            vnp = vnpay()
-            vnp.requestData['vnp_Version'] = '2.1.0'
-            vnp.requestData['vnp_Command'] = 'pay'
-            vnp.requestData['vnp_TmnCode'] = settings.VNPAY_TMN_CODE
-            vnp.requestData['vnp_Amount'] = amount * 100
-            vnp.requestData['vnp_CurrCode'] = 'VND'
-            vnp.requestData['vnp_TxnRef'] = order_id
-            vnp.requestData['vnp_OrderInfo'] = order_desc
-            vnp.requestData['vnp_OrderType'] = order_type
-            # Check language, default: vn
-            if language and language != '':
-                vnp.requestData['vnp_Locale'] = language
-            else:
-                vnp.requestData['vnp_Locale'] = 'vn'
-                # Check bank_code, if bank_code is empty, customer will be selected bank on VNPAY
-            if bank_code and bank_code != "":
-                vnp.requestData['vnp_BankCode'] = bank_code
-
-            vnp.requestData['vnp_CreateDate'] = datetime.now().strftime('%Y%m%d%H%M%S')  # 20150410063022
-            vnp.requestData['vnp_IpAddr'] = ipaddr
-            vnp.requestData['vnp_ReturnUrl'] = settings.VNPAY_RETURN_URL
-            vnpay_payment_url = vnp.get_payment_url(settings.VNPAY_PAYMENT_URL, settings.VNPAY_HASH_SECRET_KEY)
+            vnpay_client = VNPayClient(
+                settings.VNPAY_TMN_CODE,
+                settings.VNPAY_HASH_SECRET_KEY,
+                settings.VNPAY_PAYMENT_URL,
+            )
+            vnpay_payment_url = vnpay_client.create_payment_url(
+                amount=amount,
+                order_id=order_id,
+                order_info=order_desc,
+                return_url=settings.VNPAY_RETURN_URL,
+                ip_addr=ipaddr,
+                order_type=order_type,
+                locale=language or 'vn',
+                bank_code=bank_code,
+                created_at=datetime.now(),
+            )
             return redirect(vnpay_payment_url)
         return render(request, 'payment.html', {'title': 'Thanh toán', 'form': form})
     return render(request, 'payment.html', {'title': 'Thanh toán', 'form': PaymentForm()})
 
 
 def _process_vnpay_callback(input_data):
-    required_fields = (
-        'vnp_SecureHash', 'vnp_TxnRef', 'vnp_Amount',
-        'vnp_ResponseCode', 'vnp_TmnCode',
-    )
-    if any(field not in input_data for field in required_fields):
-        return None, 'invalid_request'
-
-    callback_data = input_data.dict()
-    vnp = vnpay()
-    vnp.responseData = callback_data.copy()
-    if not vnp.validate_response(settings.VNPAY_HASH_SECRET_KEY):
-        return None, 'invalid_signature'
-    if callback_data['vnp_TmnCode'] != settings.VNPAY_TMN_CODE:
-        return None, 'wrong_merchant'
-
     try:
-        callback_amount = int(callback_data['vnp_Amount'])
-    except (TypeError, ValueError):
-        return None, 'invalid_amount'
+        vnpay_client = VNPayClient(
+            settings.VNPAY_TMN_CODE,
+            settings.VNPAY_HASH_SECRET_KEY,
+            settings.VNPAY_PAYMENT_URL,
+        )
+        callback_data = vnpay_client.verify_callback(input_data)
+    except VNPayCallbackError as error:
+        return None, error.code
 
     with db_transaction.atomic():
         payment_record = PaymentTransaction.objects.select_for_update().filter(
@@ -149,6 +125,7 @@ def _process_vnpay_callback(input_data):
         ).first()
         if payment_record is None:
             return None, 'unknown_order'
+        callback_amount = int(callback_data['vnp_Amount'])
         if callback_amount != payment_record.amount * 100:
             return None, 'invalid_amount'
         if payment_record.status != PaymentTransaction.Status.PENDING:
@@ -278,36 +255,17 @@ def query(request):
     url = settings.VNPAY_API_URL
     secret_key = settings.VNPAY_HASH_SECRET_KEY
     vnp_TmnCode = settings.VNPAY_TMN_CODE
-    vnp_Version = '2.1.0'
-
-    vnp_RequestId = n_str
-    vnp_Command = 'querydr'
-    vnp_TxnRef = request.POST['order_id']
-    vnp_OrderInfo = 'kiem tra gd'
-    vnp_TransactionDate = request.POST['trans_date']
     vnp_CreateDate = datetime.now().strftime('%Y%m%d%H%M%S')
     vnp_IpAddr = get_client_ip(request)
 
-    hash_data = "|".join([
-        vnp_RequestId, vnp_Version, vnp_Command, vnp_TmnCode,
-        vnp_TxnRef, vnp_TransactionDate, vnp_CreateDate,
-        vnp_IpAddr, vnp_OrderInfo
-    ])
-
-    secure_hash = hmac.new(secret_key.encode(), hash_data.encode(), hashlib.sha512).hexdigest()
-
-    data = {
-        "vnp_RequestId": vnp_RequestId,
-        "vnp_TmnCode": vnp_TmnCode,
-        "vnp_Command": vnp_Command,
-        "vnp_TxnRef": vnp_TxnRef,
-        "vnp_OrderInfo": vnp_OrderInfo,
-        "vnp_TransactionDate": vnp_TransactionDate,
-        "vnp_CreateDate": vnp_CreateDate,
-        "vnp_IpAddr": vnp_IpAddr,
-        "vnp_Version": vnp_Version,
-        "vnp_SecureHash": secure_hash
-    }
+    vnpay_client = VNPayClient(vnp_TmnCode, secret_key, settings.VNPAY_PAYMENT_URL)
+    data = vnpay_client.build_query_request(
+        request_id=n_str,
+        order_id=request.POST['order_id'],
+        transaction_date=request.POST['trans_date'],
+        create_date=vnp_CreateDate,
+        ip_addr=vnp_IpAddr,
+    )
 
     headers = {"Content-Type": "application/json"}
 
@@ -327,43 +285,20 @@ def refund(request):
     url = settings.VNPAY_API_URL
     secret_key = settings.VNPAY_HASH_SECRET_KEY
     vnp_TmnCode = settings.VNPAY_TMN_CODE
-    vnp_RequestId = n_str
-    vnp_Version = '2.1.0'
-    vnp_Command = 'refund'
-    vnp_TransactionType = request.POST['TransactionType']
-    vnp_TxnRef = request.POST['order_id']
-    vnp_Amount = request.POST['amount']
-    vnp_OrderInfo = request.POST['order_desc']
-    vnp_TransactionNo = '0'
-    vnp_TransactionDate = request.POST['trans_date']
     vnp_CreateDate = datetime.now().strftime('%Y%m%d%H%M%S')
-    vnp_CreateBy = 'user01'
     vnp_IpAddr = get_client_ip(request)
 
-    hash_data = "|".join([
-        vnp_RequestId, vnp_Version, vnp_Command, vnp_TmnCode, vnp_TransactionType, vnp_TxnRef,
-        vnp_Amount, vnp_TransactionNo, vnp_TransactionDate, vnp_CreateBy, vnp_CreateDate,
-        vnp_IpAddr, vnp_OrderInfo
-    ])
-
-    secure_hash = hmac.new(secret_key.encode(), hash_data.encode(), hashlib.sha512).hexdigest()
-
-    data = {
-        "vnp_RequestId": vnp_RequestId,
-        "vnp_TmnCode": vnp_TmnCode,
-        "vnp_Command": vnp_Command,
-        "vnp_TxnRef": vnp_TxnRef,
-        "vnp_Amount": vnp_Amount,
-        "vnp_OrderInfo": vnp_OrderInfo,
-        "vnp_TransactionDate": vnp_TransactionDate,
-        "vnp_CreateDate": vnp_CreateDate,
-        "vnp_IpAddr": vnp_IpAddr,
-        "vnp_TransactionType": vnp_TransactionType,
-        "vnp_TransactionNo": vnp_TransactionNo,
-        "vnp_CreateBy": vnp_CreateBy,
-        "vnp_Version": vnp_Version,
-        "vnp_SecureHash": secure_hash
-    }
+    vnpay_client = VNPayClient(vnp_TmnCode, secret_key, settings.VNPAY_PAYMENT_URL)
+    data = vnpay_client.build_refund_request(
+        request_id=n_str,
+        transaction_type=request.POST['TransactionType'],
+        order_id=request.POST['order_id'],
+        amount=request.POST['amount'],
+        transaction_date=request.POST['trans_date'],
+        create_date=vnp_CreateDate,
+        ip_addr=vnp_IpAddr,
+        order_info=request.POST['order_desc'],
+    )
 
     headers = {"Content-Type": "application/json"}
 

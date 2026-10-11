@@ -55,7 +55,7 @@ Sau đó đăng nhập trên cổng [VNPAYGW SIT Testing](https://sandbox.vnpaym
    `https://ten-ngau-nhien.trycloudflare.com/payment_ipn`
 
 
-
+tới đây là chạy được app rồi
 
 
 
@@ -73,7 +73,6 @@ Xem logs:
 docker compose logs -f web
 docker compose logs -f db
 ```
-
 
 
 ## Xem database MySQL

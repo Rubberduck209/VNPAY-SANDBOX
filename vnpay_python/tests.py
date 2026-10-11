@@ -1,12 +1,141 @@
 import hashlib
 import hmac
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import parse_qs, quote_plus, urlencode, urlsplit
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from vnpay_lib import (
+    VNPayCallbackError,
+    VNPayClient,
+    hmac_sha512,
+    verify_response_signature,
+)
 from vnpay_python.models import PaymentTransaction
 from vnpay_python.templatetags.currency import vnd
+
+
+class VNPayLibraryTests(TestCase):
+    def setUp(self):
+        self.client = VNPayClient('test-merchant', 'test-secret')
+
+    def callback(self, **overrides):
+        values = {
+            'vnp_TmnCode': 'test-merchant',
+            'vnp_TxnRef': 'order-1001',
+            'vnp_Amount': '1250000',
+            'vnp_ResponseCode': '00',
+        }
+        values.update(overrides)
+        signed_data = '&'.join(
+            '{}={}'.format(key, quote_plus(str(value)))
+            for key, value in sorted(values.items())
+        )
+        values['vnp_SecureHash'] = hmac_sha512('test-secret', signed_data)
+        return values
+
+    def test_payment_url_converts_vnd_and_adds_valid_signature(self):
+        url = self.client.create_payment_url(
+            amount=10000,
+            order_id='order-1001',
+            order_info='Test order',
+            return_url='https://shop.example/payment/return',
+            ip_addr='127.0.0.1',
+            created_at='20261007120000',
+        )
+        parameters = {
+            key: values[0]
+            for key, values in parse_qs(urlsplit(url).query).items()
+        }
+
+        self.assertIn('vnp_Amount=1000000', url)
+        self.assertEqual(parameters['vnp_TmnCode'], 'test-merchant')
+        self.assertTrue(verify_response_signature(parameters, 'test-secret'))
+
+    def test_callback_verification_checks_signature_merchant_amount_and_order(self):
+        callback = self.callback()
+        original_callback = callback.copy()
+
+        verified = self.client.verify_callback(
+            callback,
+            expected_amount=12500,
+            expected_order_id='order-1001',
+        )
+
+        self.assertEqual(verified['vnp_ResponseCode'], '00')
+        self.assertEqual(callback, original_callback)
+        with self.assertRaises(VNPayCallbackError) as amount_error:
+            self.client.verify_callback(callback, expected_amount=12501)
+        self.assertEqual(amount_error.exception.code, 'invalid_amount')
+        with self.assertRaises(VNPayCallbackError) as order_error:
+            self.client.verify_callback(callback, expected_order_id='different-order')
+        self.assertEqual(order_error.exception.code, 'unknown_order')
+
+    def test_callback_with_invalid_signature_is_rejected(self):
+        callback = self.callback()
+        callback['vnp_SecureHash'] = 'invalid'
+
+        with self.assertRaises(VNPayCallbackError) as error:
+            self.client.verify_callback(callback)
+
+        self.assertEqual(error.exception.code, 'invalid_signature')
+
+    def test_api_request_signing_uses_explicit_pipe_delimited_field_order(self):
+        request_data = {
+            'vnp_RequestId': 'request-1',
+            'vnp_Command': 'querydr',
+            'vnp_TxnRef': 'order-1001',
+        }
+
+        signed_request = self.client.sign_api_request(
+            request_data,
+            ('vnp_RequestId', 'vnp_Command', 'vnp_TxnRef'),
+        )
+
+        self.assertEqual(
+            signed_request['vnp_SecureHash'],
+            hmac_sha512('test-secret', 'request-1|querydr|order-1001'),
+        )
+        self.assertNotIn('vnp_SecureHash', request_data)
+
+    def test_query_and_refund_builders_use_their_vnpay_field_orders(self):
+        query = self.client.build_query_request(
+            request_id='request-1',
+            order_id='order-1001',
+            transaction_date='20261007120000',
+            create_date='20261007120100',
+            ip_addr='127.0.0.1',
+        )
+        refund = self.client.build_refund_request(
+            request_id='request-2',
+            transaction_type='03',
+            order_id='order-1001',
+            amount='500000',
+            transaction_date='20261007120000',
+            create_date='20261007120200',
+            ip_addr='127.0.0.1',
+            order_info='Partial refund',
+        )
+
+        self.assertEqual(query['vnp_Command'], 'querydr')
+        self.assertEqual(
+            query['vnp_SecureHash'],
+            hmac_sha512(
+                'test-secret',
+                'request-1|2.1.0|querydr|test-merchant|order-1001|'
+                '20261007120000|20261007120100|127.0.0.1|kiem tra gd',
+            ),
+        )
+        self.assertEqual(refund['vnp_Command'], 'refund')
+        self.assertEqual(
+            refund['vnp_SecureHash'],
+            hmac_sha512(
+                'test-secret',
+                'request-2|2.1.0|refund|test-merchant|03|order-1001|'
+                '500000|0|20261007120000|user01|20261007120200|'
+                '127.0.0.1|Partial refund',
+            ),
+        )
 
 
 @override_settings(
