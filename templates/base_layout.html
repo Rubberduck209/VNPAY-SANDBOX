@@ -21,7 +21,6 @@
             <a href="{% url 'transactions' %}" class="{% if request.resolver_match.url_name == 'transactions' %}active{% endif %}">Giao dịch</a>
             <a href="{% url 'payment' %}" class="{% if request.resolver_match.url_name == 'payment' %}active{% endif %}">Tạo thanh toán</a>
             <a href="{% url 'query' %}" class="{% if request.resolver_match.url_name == 'query' %}active{% endif %}">Tra cứu VNPay</a>
-            <a href="{% url 'refund' %}" class="{% if request.resolver_match.url_name == 'refund' %}active{% endif %}">Hoàn tiền</a>
         </nav>
     </header>
     <main class="page-container">

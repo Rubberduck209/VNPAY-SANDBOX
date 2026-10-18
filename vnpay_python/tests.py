@@ -312,14 +312,15 @@ class TransactionHistoryTests(TestCase):
         self.assertContains(response, 'Không tìm thấy giao dịch')
         self.assertEqual(response.context['page'].paginator.count, 0)
 
-    def test_payment_tools_render_with_shared_navigation(self):
-        for page_name in ('payment', 'query', 'refund'):
+    def test_payment_tools_render_without_refund_navigation(self):
+        for page_name in ('payment', 'query'):
             with self.subTest(page=page_name):
                 response = self.client.get(reverse(page_name))
 
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, 'VNPay')
                 self.assertContains(response, 'Giao dịch')
+                self.assertNotContains(response, 'Hoàn tiền')
 
     def test_currency_uses_dots_as_thousands_separator(self):
         self.assertEqual(vnd(500000), '500.000')
