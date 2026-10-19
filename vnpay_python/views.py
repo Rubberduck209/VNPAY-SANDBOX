@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 from django.conf import settings
 from django.core.paginator import Paginator
-from django.db import transaction as db_transaction
+from django.db import IntegrityError, transaction as db_transaction
 from django.db.models import Q, Sum
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render, redirect
@@ -16,7 +16,7 @@ from django.urls import reverse
 
 from vnpay_python.forms import PaymentForm
 from vnpay_python.models import PaymentTransaction
-from vnpay_lib import VNPayCallbackError, VNPayClient
+from vnpay_lib import VNPayCallbackError, VNPayClient, VNPayError
 
 
 def index(request):
@@ -64,6 +64,21 @@ def transaction_history(request):
     })
 
 
+def _duplicate_order_message(payment_record):
+    """Thông báo khi mã hóa đơn đã tồn tại. Mỗi lần thử thanh toán cần một mã mới."""
+    if payment_record.status == PaymentTransaction.Status.SUCCEEDED:
+        return 'Mã hóa đơn này đã được thanh toán.'
+    if payment_record.status == PaymentTransaction.Status.FAILED:
+        return (
+            'Mã hóa đơn này đã thanh toán không thành công. '
+            'Vui lòng dùng mã hóa đơn mới để thử lại.'
+        )
+    return (
+        'Mã hóa đơn này đang chờ kết quả thanh toán. '
+        'Vui lòng dùng mã hóa đơn mới hoặc chờ kết quả.'
+    )
+
+
 def payment(request):
     if request.method == 'POST':
         form = PaymentForm(request.POST)
@@ -75,34 +90,46 @@ def payment(request):
             bank_code = form.cleaned_data['bank_code']
             language = form.cleaned_data['language']
             ipaddr = get_client_ip(request)
-            if PaymentTransaction.objects.filter(order_id=order_id).exists():
-                form.add_error('order_id', 'Mã đơn hàng này đã được sử dụng.')
+            existing_record = PaymentTransaction.objects.filter(order_id=order_id).first()
+            if existing_record is not None:
+                form.add_error('order_id', _duplicate_order_message(existing_record))
                 return render(request, 'payment.html', {'title': 'Thanh toán', 'form': form})
 
-            PaymentTransaction.objects.create(
-                order_id=order_id,
-                amount=amount,
-                order_type=order_type,
-                order_desc=order_desc,
-                requested_bank_code=bank_code,
-            )
-
-            vnpay_client = VNPayClient(
-                settings.VNPAY_TMN_CODE,
-                settings.VNPAY_HASH_SECRET_KEY,
-                settings.VNPAY_PAYMENT_URL,
-            )
-            vnpay_payment_url = vnpay_client.create_payment_url(
-                amount=amount,
-                order_id=order_id,
-                order_info=order_desc,
-                return_url=settings.VNPAY_RETURN_URL,
-                ip_addr=ipaddr,
-                order_type=order_type,
-                locale=language or 'vn',
-                bank_code=bank_code,
-                created_at=datetime.now(),
-            )
+            # Lưu đơn và tạo link trong cùng một transaction: nếu tạo link lỗi
+            # (số tiền sai, cấu hình thiếu...) thì đơn pending cũng được rollback,
+            # không để lại đơn "mồ côi" trong DB.
+            try:
+                with db_transaction.atomic():
+                    PaymentTransaction.objects.create(
+                        order_id=order_id,
+                        amount=amount,
+                        order_type=order_type,
+                        order_desc=order_desc,
+                        requested_bank_code=bank_code,
+                    )
+                    vnpay_client = VNPayClient(
+                        settings.VNPAY_TMN_CODE,
+                        settings.VNPAY_HASH_SECRET_KEY,
+                        settings.VNPAY_PAYMENT_URL,
+                    )
+                    vnpay_payment_url = vnpay_client.create_payment_url(
+                        amount=amount,
+                        order_id=order_id,
+                        order_info=order_desc,
+                        return_url=settings.VNPAY_RETURN_URL,
+                        ip_addr=ipaddr,
+                        order_type=order_type,
+                        locale=language or 'vn',
+                        bank_code=bank_code,
+                        created_at=datetime.now(),
+                    )
+            except IntegrityError:
+                # Hai request cùng order_id chạy đồng thời: request đến sau thua ở ràng buộc unique.
+                form.add_error('order_id', 'Mã đơn hàng này đã được sử dụng.')
+                return render(request, 'payment.html', {'title': 'Thanh toán', 'form': form})
+            except VNPayError as error:
+                form.add_error(None, 'Không thể tạo yêu cầu thanh toán: {}'.format(error))
+                return render(request, 'payment.html', {'title': 'Thanh toán', 'form': form})
             return redirect(vnpay_payment_url)
         return render(request, 'payment.html', {'title': 'Thanh toán', 'form': form})
     return render(request, 'payment.html', {'title': 'Thanh toán', 'form': PaymentForm()})
@@ -132,10 +159,15 @@ def _process_vnpay_callback(input_data):
             return payment_record, 'already_processed'
 
         response_code = callback_data['vnp_ResponseCode']
+        # VNPay khuyến nghị coi giao dịch là thành công chỉ khi CẢ vnp_ResponseCode
+        # và vnp_TransactionStatus đều là '00'. Nếu VNPay không gửi
+        # vnp_TransactionStatus thì chỉ xét vnp_ResponseCode.
+        transaction_status = callback_data.get('vnp_TransactionStatus', '00')
+        is_paid = response_code == '00' and transaction_status == '00'
         payment_record.response_code = response_code
         payment_record.status = (
             PaymentTransaction.Status.SUCCEEDED
-            if response_code == '00'
+            if is_paid
             else PaymentTransaction.Status.FAILED
         )
         payment_record.transaction_no = callback_data.get('vnp_TransactionNo', '')
@@ -200,16 +232,18 @@ def payment_return(request):
 def payment_status_label(response_code):
     status_map = {
         "00": "Thành công",
-        "24": "Khách hàng hủy thanh toán",
-        "04": "Giao dịch quá hạn hoặc không thành công",
-        "05": "Giao dịch không thành công do xác thực",
-        "09": "Thẻ/Tài khoản chưa đăng ký dịch vụ",
-        "10": "Xác thực OTP thất bại",
-        "11": "Giao dịch đã bị hủy",
-        "12": "Thẻ/Tài khoản không đủ số dư",
-        "13": "Khách hàng nhập sai thông tin",
-        "15": "Khách hàng chưa đăng nhập",
-        "47": "Tài khoản đã hết hạn",
+        "07": "Giao dịch bị nghi ngờ (cần đối soát với VNPay)",
+        "09": "Thẻ/Tài khoản chưa đăng ký dịch vụ Internet Banking",
+        "10": "Xác thực thông tin thẻ/tài khoản sai quá số lần quy định",
+        "11": "Đã hết hạn chờ thanh toán",
+        "12": "Thẻ/Tài khoản bị khóa",
+        "13": "Nhập sai mật khẩu xác thực giao dịch (OTP)",
+        "24": "Khách hàng hủy giao dịch",
+        "51": "Tài khoản không đủ số dư",
+        "65": "Tài khoản vượt quá hạn mức giao dịch trong ngày",
+        "75": "Ngân hàng thanh toán đang bảo trì",
+        "79": "Nhập sai mật khẩu thanh toán quá số lần quy định",
+        "99": "Lỗi khác",
     }
     if not response_code:
         return 'Đang chờ kết quả thanh toán'
@@ -228,7 +262,12 @@ def summary(request):
         'order_desc': payment_record.order_desc,
         'vnp_TransactionNo': payment_record.transaction_no,
         'vnp_ResponseCode': payment_record.response_code,
-        'payment_status': payment_status_label(payment_record.response_code),
+        'payment_status': (
+            'Thanh toán không thành công'
+            if payment_record.status == PaymentTransaction.Status.FAILED
+            and payment_record.response_code == '00'
+            else payment_status_label(payment_record.response_code)
+        ),
         'is_success': is_success,
     }
     return render(request, "summary.html", context)

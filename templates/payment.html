@@ -9,7 +9,10 @@
     </section>
     <section class="content-card form-card">
         {% if form.errors %}
-        <div class="alert alert-danger form-alert">Vui lòng kiểm tra lại thông tin thanh toán.</div>
+        <div class="alert alert-danger form-alert">
+            Vui lòng kiểm tra lại thông tin thanh toán.
+            {% for error in form.non_field_errors %}<br>{{ error }}{% endfor %}
+        </div>
         {% endif %}
         <div class="form-content">
         <form action="{% url "payment" %}" id="create_form" method="post">
